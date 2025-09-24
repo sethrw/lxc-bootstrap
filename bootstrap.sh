@@ -196,10 +196,24 @@ log_info "Starting/resuming setup..."
 if ! check_step "system_packages"; then
     log_info "Installing system packages..."
     apt update
-    apt install -y curl git nginx ufw unzip wget sudo
+    apt install -y curl git nginx ufw unzip wget sudo openssh-server
     mark_step "system_packages"
 else
     log_skip "System packages"
+fi
+
+if ! check_step "ssh_config"; then
+    log_info "Configuring SSH for root login..."
+    # Enable root login via SSH (needed for CI/CD)
+    sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    
+    # Restart SSH service to apply changes
+    systemctl restart sshd
+    systemctl enable ssh
+    mark_step "ssh_config"
+else
+    log_skip "SSH configuration"
 fi
 
 if ! check_step "appuser_created"; then
