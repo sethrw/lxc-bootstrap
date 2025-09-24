@@ -384,6 +384,11 @@ if ! check_step "ssh_keys_setup"; then
     else
         log_info "SSH key already exists"
     fi
+    
+    # Add GitHub to known_hosts to avoid host key verification prompt
+    log_info "Adding GitHub to known hosts..."
+    su - appuser -c "ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null"
+    
     mark_step "ssh_keys_setup"
 else
     log_skip "SSH keys setup"
