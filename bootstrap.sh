@@ -230,7 +230,7 @@ if [ "$DB_CHOICE" = "1" ] && ! check_step "pocketbase_setup"; then
     fi
     
     # Create PM2 config
-    cat > ecosystem.config.js << EOF
+    cat > ecosystem.config.cjs << EOF
 module.exports = {
   apps: [{
     name: 'pocketbase',
@@ -242,7 +242,7 @@ module.exports = {
 EOF
     
     # Start PocketBase
-    pm2 start ecosystem.config.js
+    pm2 start ecosystem.config.cjs
     sleep 5
     
     # Create admin user
@@ -335,7 +335,7 @@ EOF
     npm run build
     
     # Create PM2 config
-    cat > ecosystem.config.js << EOF
+    cat > ecosystem.config.cjs << EOF
 module.exports = {
   apps: [{
     name: '$APP_NAME',
@@ -348,7 +348,7 @@ module.exports = {
 EOF
     
     # Start app
-    pm2 start ecosystem.config.js
+    pm2 start ecosystem.config.cjs
     pm2 save
     pm2 startup | grep -E '^sudo ' | bash || true
     
