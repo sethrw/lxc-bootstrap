@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# LXC App Bootstrap Script v2 - Clean Architecture
+# LXC App Bootstrap Script
 # Usage: wget https://raw.githubusercontent.com/yourusername/lxc-bootstrap/main/bootstrap.sh && chmod +x bootstrap.sh && ./bootstrap.sh
 
 set -e  # Exit on any error
@@ -55,15 +55,15 @@ load_config() {
 # Banner
 echo -e "${BLUE}"
 cat << "EOF"
-🚀 LXC App Bootstrap v2
-======================
-Clean architecture - no ownership conflicts!
+🚀 LXC App Bootstrap
+====================
+Deploy your Nuxt app with database and CI/CD
 EOF
 echo -e "${NC}"
 
-# Must run as root for initial setup
+# Must run with administrator privileges
 if [ "$EUID" -ne 0 ]; then
-    log_error "Please run as root for initial system setup"
+    log_error "Please run with administrator privileges"
     exit 1
 fi
 
@@ -93,11 +93,11 @@ if [ -z "$APP_NAME" ]; then
     echo ""
     log_info "App configuration:"
     
-    read -p "App name (e.g., my-app): " APP_NAME
+    read -p "App name (lowercase, no spaces, e.g. my-app): " APP_NAME
     [[ -z "$APP_NAME" ]] && { log_error "App name required"; exit 1; }
     save_config "APP_NAME" "$APP_NAME"
     
-    read -p "GitHub repo (git@github.com:user/repo.git): " GITHUB_REPO
+    read -p "GitHub SSH URL (git@github.com:username/repository.git): " GITHUB_REPO
     [[ -z "$GITHUB_REPO" ]] && { log_error "GitHub repo required"; exit 1; }
     save_config "GITHUB_REPO" "$GITHUB_REPO"
     
@@ -118,8 +118,8 @@ if [ -z "$APP_NAME" ]; then
         save_config "PB_EMAIL" "$PB_EMAIL"
         save_config "PB_PASSWORD" "$PB_PASSWORD"
     else
-        read -p "PostgreSQL username [${APP_NAME}user]: " DB_USER
-        DB_USER=${DB_USER:-${APP_NAME}user}
+        read -p "PostgreSQL username [${APP_NAME//[-.]/_}user]: " DB_USER
+        DB_USER=${DB_USER:-${APP_NAME//[-.]/_}user}
         read -s -p "PostgreSQL password: " DB_PASSWORD
         echo ""
         [[ -z "$DB_PASSWORD" ]] && { log_error "Password required"; exit 1; }
@@ -127,20 +127,27 @@ if [ -z "$APP_NAME" ]; then
         save_config "DB_PASSWORD" "$DB_PASSWORD"
     fi
     
-    # CI/CD setup
+    # CI/CD setup - always required
     echo ""
-    read -p "Set up CI/CD? [y/N]: " SETUP_CICD
-    if [[ "$SETUP_CICD" =~ ^[Yy]$ ]]; then
-        read -p "GitHub token: " GITHUB_TOKEN
-        read -p "Toolbox IP: " TOOLBOX_IP
-        if [[ -n "$GITHUB_TOKEN" && -n "$TOOLBOX_IP" ]]; then
-            save_config "GITHUB_TOKEN" "$GITHUB_TOKEN"
-            save_config "TOOLBOX_IP" "$TOOLBOX_IP"
-            save_config "SETUP_CICD" "true"
-        else
-            log_warning "Missing token or toolbox IP - skipping CI/CD"
-        fi
-    fi
+    log_info "CI/CD configuration (required):"
+    read -p "GitHub personal access token (needs 'repo' permissions): " GITHUB_TOKEN
+    [[ -z "$GITHUB_TOKEN" ]] && { 
+        log_error "GitHub token required for CI/CD setup"
+        log_error "Create token at: https://github.com/settings/tokens"
+        log_error "Grant 'repo' permission and re-run script"
+        exit 1
+    }
+    
+    read -p "Toolbox server IP address (where GitHub runner is installed): " TOOLBOX_IP
+    [[ -z "$TOOLBOX_IP" ]] && { 
+        log_error "Toolbox IP required for CI/CD setup"
+        log_error "This should be the IP of your management server"
+        exit 1
+    }
+    
+    save_config "GITHUB_TOKEN" "$GITHUB_TOKEN"
+    save_config "TOOLBOX_IP" "$TOOLBOX_IP"
+    save_config "SETUP_CICD" "true"
 else
     # Load existing config
     GITHUB_REPO=$(load_config "GITHUB_REPO")
@@ -158,68 +165,25 @@ echo ""
 log_info "Starting setup..."
 
 # =============================================================================
-# ROOT-LEVEL SYSTEM SETUP (ONCE)
+# SYSTEM SETUP
 # =============================================================================
 
 if ! check_step "system_setup"; then
     log_info "Installing system packages..."
     apt update
-    apt install -y curl wget git sudo openssh-server ufw
+    apt install -y curl wget git openssh-server ufw unzip
     
-    # Configure SSH for passwordless access
+    # Configure SSH
     log_info "Configuring SSH..."
-    sed -i 's/#PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-    sed -i 's/PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+    sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+    sed -i 's/PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
     systemctl restart sshd
     systemctl enable ssh
-    
-    # Create dedicated app user
-    log_info "Creating app user: $APP_NAME"
-    if ! id "$APP_NAME" &>/dev/null; then
-        useradd -m -s /bin/bash "$APP_NAME"
-        # Give sudo access for package installation only
-        echo "$APP_NAME ALL=(ALL) NOPASSWD: /usr/bin/apt, /usr/bin/systemctl" > "/etc/sudoers.d/$APP_NAME"
-    fi
     
     mark_step "system_setup"
 else
     log_skip "System setup"
 fi
-
-# =============================================================================
-# SWITCH TO APP USER FOR EVERYTHING ELSE
-# =============================================================================
-
-log_info "Switching to user: $APP_NAME for all app operations"
-
-# Create setup script to run as app user
-SETUP_SCRIPT="/tmp/user_setup.sh"
-cat > "$SETUP_SCRIPT" << 'SCRIPT_EOF'
-#!/bin/bash
-set -e
-
-APP_NAME="__APP_NAME__"
-GITHUB_REPO="__GITHUB_REPO__"
-DB_CHOICE="__DB_CHOICE__"
-PB_EMAIL="__PB_EMAIL__"
-PB_PASSWORD="__PB_PASSWORD__"
-DB_USER="__DB_USER__"
-DB_PASSWORD="__DB_PASSWORD__"
-SETUP_CICD="__SETUP_CICD__"
-CONTAINER_IP="__CONTAINER_IP__"
-PROGRESS_FILE="__PROGRESS_FILE__"
-
-check_step() {
-    grep -q "^$1$" "$PROGRESS_FILE" 2>/dev/null
-}
-
-mark_step() {
-    echo "$1" >> "$PROGRESS_FILE"
-}
-
-log_info() { echo -e "\033[0;34mℹ️  $1\033[0m"; }
-log_success() { echo -e "\033[0;32m✅ $1\033[0m"; }
-log_skip() { echo -e "\033[1;33m⏭️  $1 (already done)\033[0m"; }
 
 # =============================================================================
 # NODE.JS SETUP
@@ -228,13 +192,17 @@ log_skip() { echo -e "\033[1;33m⏭️  $1 (already done)\033[0m"; }
 if ! check_step "nodejs_setup"; then
     if ! command -v node &>/dev/null; then
         log_info "Installing Node.js..."
-        curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo bash -
-        sudo apt install -y nodejs
+        curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+        apt install -y nodejs
+    else
+        log_info "Node.js already installed: $(node --version)"
     fi
     
     if ! command -v pm2 &>/dev/null; then
         log_info "Installing PM2..."
         npm install -g pm2
+    else
+        log_info "PM2 already installed: $(pm2 --version)"
     fi
     
     mark_step "nodejs_setup"
@@ -249,8 +217,8 @@ fi
 if [ "$DB_CHOICE" = "1" ] && ! check_step "pocketbase_setup"; then
     log_info "Setting up PocketBase..."
     
-    mkdir -p ~/pocketbase
-    cd ~/pocketbase
+    mkdir -p /opt/pocketbase
+    cd /opt/pocketbase
     
     if [ ! -f "pocketbase" ]; then
         PB_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)
@@ -268,7 +236,7 @@ module.exports = {
     name: 'pocketbase',
     script: './pocketbase',
     args: 'serve --http=0.0.0.0:8090',
-    cwd: process.env.HOME + '/pocketbase'
+    cwd: '/opt/pocketbase'
   }]
 };
 EOF
@@ -287,18 +255,27 @@ EOF
 elif [ "$DB_CHOICE" = "2" ] && ! check_step "postgres_setup"; then
     log_info "Setting up PostgreSQL..."
     
-    sudo apt install -y postgresql postgresql-contrib
-    sudo systemctl start postgresql
-    sudo systemctl enable postgresql
+    apt install -y postgresql postgresql-contrib
+    systemctl start postgresql
+    systemctl enable postgresql
     
     # Create database and user
     sudo -u postgres createuser "$DB_USER" || true
-    sudo -u postgres createdb "${APP_NAME}_db" -O "$DB_USER" || true
+    sudo -u postgres createdb "${APP_NAME//[-.]/_}_db" -O "$DB_USER" || true
     sudo -u postgres psql -c "ALTER USER $DB_USER PASSWORD '$DB_PASSWORD';" || true
     
-    DATABASE_CONFIG="DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${APP_NAME}_db"
+    DATABASE_CONFIG="DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${APP_NAME//[-.]/_}_db"
     
     mark_step "postgres_setup"
+    
+elif [ "$DB_CHOICE" = "1" ]; then
+    log_skip "PocketBase setup"
+    DATABASE_CONFIG="POCKETBASE_URL=http://localhost:8090"
+elif [ "$DB_CHOICE" = "2" ]; then
+    log_skip "PostgreSQL setup"
+    DB_USER=$(load_config "DB_USER")
+    DB_PASSWORD=$(load_config "DB_PASSWORD")
+    DATABASE_CONFIG="DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${APP_NAME//[-.]/_}_db"
 fi
 
 # =============================================================================
@@ -308,21 +285,21 @@ fi
 if ! check_step "ssh_keys"; then
     log_info "Setting up SSH keys..."
     
-    if [ ! -f ~/.ssh/id_rsa ]; then
-        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ''
+    if [ ! -f /root/.ssh/id_rsa ]; then
+        ssh-keygen -t rsa -b 4096 -f /root/.ssh/id_rsa -N ''
         
         echo ""
         echo "=========================================="
         echo "Add this SSH key to GitHub:"
         echo "=========================================="
-        cat ~/.ssh/id_rsa.pub
+        cat /root/.ssh/id_rsa.pub
         echo "=========================================="
         echo ""
         read -p "Press ENTER after adding key to GitHub..."
     fi
     
     # Add GitHub to known_hosts
-    ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
+    ssh-keyscan -H github.com >> /root/.ssh/known_hosts 2>/dev/null
     
     mark_step "ssh_keys"
 else
@@ -337,13 +314,13 @@ if ! check_step "app_deployment"; then
     log_info "Deploying app..."
     
     # Clone or update repository
-    if [ ! -d ~/"$APP_NAME" ]; then
-        git clone "$GITHUB_REPO" ~/"$APP_NAME"
+    if [ ! -d "/opt/$APP_NAME" ]; then
+        git clone "$GITHUB_REPO" "/opt/$APP_NAME"
     else
-        cd ~/"$APP_NAME" && git pull origin main
+        cd "/opt/$APP_NAME" && git pull origin main
     fi
     
-    cd ~/"$APP_NAME"
+    cd "/opt/$APP_NAME"
     
     # Create .env file
     cat > .env << EOF
@@ -384,10 +361,10 @@ fi
 # CI/CD SETUP
 # =============================================================================
 
-if [ "$SETUP_CICD" = "true" ] && ! check_step "cicd_setup"; then
+if ! check_step "cicd_setup"; then
     log_info "Setting up CI/CD..."
     
-    cd ~/"$APP_NAME"
+    cd "/opt/$APP_NAME"
     
     mkdir -p .github/workflows
     cat > .github/workflows/deploy.yml << EOF
@@ -401,8 +378,8 @@ jobs:
     steps:
     - name: Deploy to LXC
       run: |
-        ssh -o StrictHostKeyChecking=no $APP_NAME@$CONTAINER_IP "
-          cd ~/$APP_NAME
+        ssh -o StrictHostKeyChecking=no root@$CONTAINER_IP "
+          cd /opt/$APP_NAME
           git pull origin main
           npm install
           npm run build
@@ -412,7 +389,7 @@ EOF
     
     # Commit workflow file
     git add .github/workflows/deploy.yml
-    git config user.email "${APP_NAME}@bootstrap.local"
+    git config user.email "bootstrap@$APP_NAME.local"
     git config user.name "Bootstrap"
     git commit -m "Add CI/CD workflow" || true
     git push origin main || true
@@ -422,40 +399,17 @@ else
     log_skip "CI/CD setup"
 fi
 
-log_success "User setup complete!"
-SCRIPT_EOF
-
-# Substitute variables in the script
-sed -i "s|__APP_NAME__|$APP_NAME|g" "$SETUP_SCRIPT"
-sed -i "s|__GITHUB_REPO__|$GITHUB_REPO|g" "$SETUP_SCRIPT"
-sed -i "s|__DB_CHOICE__|$DB_CHOICE|g" "$SETUP_SCRIPT"
-sed -i "s|__PB_EMAIL__|$PB_EMAIL|g" "$SETUP_SCRIPT"
-sed -i "s|__PB_PASSWORD__|$PB_PASSWORD|g" "$SETUP_SCRIPT"
-sed -i "s|__DB_USER__|$DB_USER|g" "$SETUP_SCRIPT"
-sed -i "s|__DB_PASSWORD__|$DB_PASSWORD|g" "$SETUP_SCRIPT"
-sed -i "s|__SETUP_CICD__|$SETUP_CICD|g" "$SETUP_SCRIPT"
-sed -i "s|__CONTAINER_IP__|$CONTAINER_IP|g" "$SETUP_SCRIPT"
-sed -i "s|__PROGRESS_FILE__|$PROGRESS_FILE|g" "$SETUP_SCRIPT"
-
-chmod +x "$SETUP_SCRIPT"
-chown "$APP_NAME:$APP_NAME" "$SETUP_SCRIPT"
-
-# Run the user setup script
-su - "$APP_NAME" -c "$SETUP_SCRIPT"
-
-# Clean up
-rm -f "$SETUP_SCRIPT"
-
 # =============================================================================
 # FINAL SETUP
 # =============================================================================
 
-if [ "$SETUP_CICD" = "true" ] && ! check_step "ssh_toolbox_setup"; then
-    log_warning "CI/CD Setup Required:"
-    echo "On your toolbox ($TOOLBOX_IP), run:"
-    echo "ssh-copy-id $APP_NAME@$CONTAINER_IP"
+if ! check_step "ssh_toolbox_setup"; then
+    log_warning "Final CI/CD setup required:"
+    echo "On your toolbox server ($TOOLBOX_IP), run:"
+    echo "ssh-copy-id root@$CONTAINER_IP"
     echo ""
-    read -p "Press ENTER after setting up SSH from toolbox..."
+    echo "This enables passwordless SSH for automated deployments."
+    read -p "Press ENTER after completing SSH key setup..."
     mark_step "ssh_toolbox_setup"
 fi
 
@@ -478,18 +432,18 @@ if [ "$DB_CHOICE" = "1" ]; then
     echo "🗄️  PocketBase: http://$CONTAINER_IP:8090/_/"
     echo "   Email: $PB_EMAIL"
 elif [ "$DB_CHOICE" = "2" ]; then
-    echo "🗄️  PostgreSQL: ${APP_NAME}_db"
+    echo "🗄️  PostgreSQL: ${APP_NAME//[-.]/_}_db"
 fi
 
 if [ "$SETUP_CICD" = "true" ]; then
-    echo "🚀 CI/CD: Push to main → auto-deploy"
+    echo "🚀 CI/CD: Push to main branch for automated deployment"
 fi
 
 echo ""
 log_info "Management commands:"
-echo "  Status: su - $APP_NAME -c 'pm2 status'"
-echo "  Logs: su - $APP_NAME -c 'pm2 logs $APP_NAME'"
-echo "  Restart: su - $APP_NAME -c 'pm2 restart $APP_NAME'"
+echo "  Status: pm2 status"
+echo "  Logs: pm2 logs $APP_NAME"
+echo "  Restart: pm2 restart $APP_NAME"
 
 echo ""
-log_success "Process finished, no conflicts or errors!"
+log_success "Setup complete!"
