@@ -456,6 +456,8 @@ if [ "$DB_CHOICE" = "1" ]; then
     echo "   Email: $PB_EMAIL"
 elif [ "$DB_CHOICE" = "2" ]; then
     echo "🗄️  PostgreSQL: ${APP_NAME//[-.]/_}_db"
+    echo "Check your .env file to see the connection details by running:"
+    echo 'cat /opt/dw-data/.env | grep -E "(DATABASE_URL|DB_)"'
 fi
 
 if [ "$SETUP_CICD" = "true" ]; then
