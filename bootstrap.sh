@@ -264,7 +264,30 @@ elif [ "$DB_CHOICE" = "2" ] && ! check_step "postgres_setup"; then
     sudo -u postgres createdb "${APP_NAME//[-.]/_}_db" -O "$DB_USER" || true
     sudo -u postgres psql -c "ALTER USER $DB_USER PASSWORD '$DB_PASSWORD';" || true
     
+    # Configure for remote connections
+    log_info "Configuring PostgreSQL for remote access..."
+    
+    # Enable remote connections
+    sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/*/main/postgresql.conf
+    sed -i "s/listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/*/main/postgresql.conf
+    
+    # Add client authentication for private networks
+    echo "host    all             all             192.168.0.0/16          md5" >> /etc/postgresql/*/main/pg_hba.conf
+    echo "host    all             all             10.0.0.0/8              md5" >> /etc/postgresql/*/main/pg_hba.conf
+    echo "host    all             all             172.16.0.0/12           md5" >> /etc/postgresql/*/main/pg_hba.conf
+    
+    # Restart PostgreSQL to apply changes
+    systemctl restart postgresql
+    
+    # Open firewall for PostgreSQL
+    ufw allow 5432
+    
     DATABASE_CONFIG="DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@localhost/${APP_NAME//[-.]/_}_db"
+    
+    log_success "PostgreSQL configured for remote access"
+    log_info "Connect from your dev machine using:"
+    log_info "Host: $CONTAINER_IP, Port: 5432"
+    log_info "Database: ${APP_NAME//[-.]/_}_db, User: $DB_USER"
     
     mark_step "postgres_setup"
     
@@ -437,7 +460,6 @@ fi
 
 if [ "$SETUP_CICD" = "true" ]; then
     echo "🚀 CI/CD: Push to main branch for automated deployment"
-    echo "REMINDER: Run git pull on your local env to get the new deployment file"
 fi
 
 echo ""
