@@ -460,6 +460,7 @@ fi
 
 if [ "$SETUP_CICD" = "true" ]; then
     echo "🚀 CI/CD: Push to main branch for automated deployment"
+    echo "REMINDER: Run git pull on your local env to get the new deployment file"
 fi
 
 echo ""
