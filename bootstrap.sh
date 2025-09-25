@@ -171,7 +171,7 @@ log_info "Starting setup..."
 if ! check_step "system_setup"; then
     log_info "Installing system packages..."
     apt update
-    apt install -y curl wget git openssh-server ufw unzip
+    apt install -y curl wget git openssh-server ufw unzip sudo
     
     # Configure SSH
     log_info "Configuring SSH..."
@@ -456,13 +456,12 @@ if [ "$DB_CHOICE" = "1" ]; then
     echo "   Email: $PB_EMAIL"
 elif [ "$DB_CHOICE" = "2" ]; then
     echo "🗄️  PostgreSQL: ${APP_NAME//[-.]/_}_db"
-    echo "Check your .env file to see the connection details by running:"
-    echo 'cat /opt/dw-data/.env | grep -E "(DATABASE_URL|DB_)"'
+    echo "   Check connection details: cat /opt/$APP_NAME/.env | grep -E \"(DATABASE_URL|DB_)\""
 fi
 
 if [ "$SETUP_CICD" = "true" ]; then
     echo "🚀 CI/CD: Push to main branch for automated deployment"
-    echo "REMINDER: Run git pull on your local env to get the new deployment file"
+    echo "   REMINDER: Run 'git pull' on your local env to get the new deployment file"
 fi
 
 echo ""
